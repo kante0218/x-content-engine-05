@@ -22,6 +22,8 @@ import os
 import random
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from llm_gemini import Anthropic
 from dotenv import load_dotenv
@@ -139,7 +141,29 @@ def load_products() -> list[dict]:
     except Exception:
         return []
     items = data.get("products", []) if isinstance(data, dict) else data
-    return [p for p in items if isinstance(p, dict) and p.get("link", "").strip()]
+    valid = []
+    for product in items:
+        if not isinstance(product, dict):
+            continue
+        link = product.get("link", "").strip()
+        if not link:
+            continue
+        parsed = urlparse(link)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(f"商品リンクは有効なHTTPS URL必須: {product.get('name', '(名称なし)')}")
+        valid.append(product)
+    return valid
+
+
+def affiliate_allowed_today(max_per_day: int | None = None) -> bool:
+    """Pendingを含め、1日のアフィリエイト生成数を上限以内に保つ。"""
+    limit = max_per_day if max_per_day is not None else int(os.getenv("X_AFFILIATE_MAX_PER_DAY", "1"))
+    prefix = dt.datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y%m%d")
+    count = 0
+    for directory in (PENDING, POSTED):
+        if directory.exists():
+            count += sum(1 for p in directory.iterdir() if p.is_file() and p.suffix in {".md", ".txt"} and p.name.startswith(prefix) and "_aff" in p.name)
+    return count < limit
 
 
 def pick_product(category: str, products: list[dict]) -> dict | None:
@@ -280,9 +304,11 @@ def main() -> int:
         return 0
 
     products = load_products()
-    allow_aff = bool(products) and not no_aff
+    allow_aff = bool(products) and not no_aff and affiliate_allowed_today()
     if not products:
         print("[info] products.json に有効な もしもリンク が無いため、育成投稿(アフィ無し)のみ生成します")
+    elif not affiliate_allowed_today():
+        print("[info] 本日のアフィリエイト上限に達したため、育成投稿のみ生成します")
 
     theme_key, theme = pick_theme(theme_forced, allow_aff)
     product = None

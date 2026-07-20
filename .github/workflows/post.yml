@@ -72,11 +72,21 @@ jobs:
           fi
 
       - name: Random minute jitter (only when posting)
-        if: steps.gate.outputs.go == 'true'
+        if: steps.gate.outputs.go == 'true' && github.event.inputs.dry_run != 'true'
         run: |
           J=$(( RANDOM % 1381 ))   # 0〜23分。投稿確定の回だけ遅らせ、分単位でも時刻を大きくばらす
           echo "sleep ${J}s (~$(( J / 60 ))min) で分単位の時刻をばらす"
           sleep "$J"
+
+      - name: Verify X account and credentials
+        if: steps.gate.outputs.go == 'true' && github.event.inputs.dry_run != 'true' && vars.X_LIVE_POST == 'true'
+        env:
+          X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
+          X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          X_HANDLE: ${{ vars.X_HANDLE || 'ikemen_consult' }}
+        run: python scripts/preflight.py
 
       - name: Generate draft
         if: steps.gate.outputs.go == 'true'
@@ -84,6 +94,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          X_AFFILIATE_MAX_PER_DAY: "1"
         run: python scripts/generate_draft.py
 
       - name: Polish & post pending
@@ -98,9 +109,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          # トークンSecret(X_ACCESS_TOKEN)が登録された瞬間に自動でライブ投稿。
-          # 未登録の間は安全にドライラン(生成・推敲のみ)し、投稿失敗の赤ランを出さない。
-          X_LIVE_POST: ${{ (github.event.inputs.dry_run == 'true' || secrets.X_ACCESS_TOKEN == '') && 'false' || 'true' }}
+          # 明示スイッチを有効にしたときだけ投稿。Secret登録だけでは投稿しない。
+          X_LIVE_POST: ${{ (github.event.inputs.dry_run == 'true' || vars.X_LIVE_POST != 'true') && 'false' || 'true' }}
         run: python scripts/pipeline.py
 
       - name: Persist post history (dedup & daily count state)

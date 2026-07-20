@@ -31,7 +31,7 @@ def _max_chars() -> int:
         return 280
 
 
-def post(text: str, quote_tweet_id: str | None = None) -> dict:
+def post(text: str, quote_tweet_id: str | None = None, paid_partnership: bool = False) -> dict:
     text = text.strip()
     if not text:
         raise ValueError("空の投稿は送れません")
@@ -56,6 +56,8 @@ def post(text: str, quote_tweet_id: str | None = None) -> dict:
         resource_owner_secret=required["X_ACCESS_TOKEN_SECRET"],
     )
     payload: dict = {"text": text}
+    if paid_partnership:
+        payload["paid_partnership"] = True
     if quote_tweet_id:
         payload["quote_tweet_id"] = quote_tweet_id
     res = session.post(TWEETS_ENDPOINT, json=payload, timeout=30)

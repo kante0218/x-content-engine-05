@@ -15,7 +15,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-import random
 import re
 import shutil
 import sys
@@ -29,6 +28,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from polish_draft import polish  # noqa: E402
 from post_tweet import post  # noqa: E402
+from content_guard import content_hash, find_duplicate, valid_https_url  # noqa: E402
 
 HANDLE = os.getenv("X_HANDLE", "ikemen_consult")
 PENDING = ROOT / "drafts" / "pending"
@@ -39,16 +39,6 @@ LOGS = ROOT / "logs"
 QUOTE_LINE_RE = re.compile(r"^\s*quote\s*:\s*(\S+)\s*$", re.IGNORECASE)
 AFF_LINE_RE = re.compile(r"^\s*aff\s*:\s*(\S+)\s*$", re.IGNORECASE)
 TWEET_ID_RE = re.compile(r"status/(\d+)")
-
-# PR開示文(ステマ規制 必須)。アフィ投稿に1つランダム付与し連投の同一性を避ける。
-PR_DISCLOSURES = [
-    "※アフィリエイト広告を含みます #PR",
-    "#PR（アフィリエイト広告を利用しています）",
-    "※広告（アフィリエイト）を含みます #PR",
-    "#PR ※リンクから購入で運営に収益が入ります",
-    "※本投稿はプロモーションを含みます #PR",
-]
-
 
 def oldest_pending() -> Path | None:
     files = sorted(p for p in PENDING.iterdir() if p.is_file() and not p.name.startswith("."))
@@ -90,11 +80,20 @@ def parse_aff_header(raw: str) -> tuple[str | None, str]:
     return m.group(1), "\n".join(lines[1:]).lstrip()
 
 
-def with_affiliate_footer(text: str, aff_link: str | None) -> str:
-    """推敲後の本文に、アフィリンク + ランダムPR開示文を後付けする。"""
+def with_affiliate_disclosure(text: str, aff_link: str | None) -> str:
+    """アフィ投稿だと冒頭で明瞭に示し、リンクと広告説明を付ける。"""
     if not aff_link:
         return text
-    return f"{text}\n\n👉 {aff_link}\n{random.choice(PR_DISCLOSURES)}"
+    if not valid_https_url(aff_link):
+        raise ValueError("アフィリエイトリンクは有効なHTTPS URL必須です")
+    return f"【PR】\n{text}\n\n👉 {aff_link}\n※広告リンクを含みます"
+
+
+def is_deferred_error(error: Exception) -> bool:
+    msg = str(error)
+    match = re.search(r"status=(\d+)", msg)
+    status = int(match.group(1)) if match else None
+    return status in {402, 403, 429, 500, 502, 503, 504} or "CreditsDepleted" in msg
 
 
 def main() -> int:
@@ -140,8 +139,16 @@ def main() -> int:
         append_log(draft_path.name, {"event": "polish_failed", "error": str(e)})
         print(f"[polish ERROR] {e}", file=sys.stderr)
         return 1
-    polished = with_affiliate_footer(polished, aff_link)
+    polished = with_affiliate_disclosure(polished, aff_link)
     print(f"[polished] ({len(polished)}文字)\n---\n{polished}\n---")
+
+    duplicate, score = find_duplicate(polished, POSTED)
+    if duplicate:
+        FAILED.mkdir(exist_ok=True)
+        shutil.move(str(draft_path), str(FAILED / draft_path.name))
+        append_log(draft_path.name, {"event": "duplicate_blocked", "similarity": score, "sha256": content_hash(polished)})
+        print(f"[duplicate BLOCKED] similarity={score:.3f}", file=sys.stderr)
+        return 1
 
     if not live:
         append_log(
@@ -152,11 +159,18 @@ def main() -> int:
         return 0
 
     try:
-        result = post(polished, quote_tweet_id=quote_id)
+        result = post(polished, quote_tweet_id=quote_id, paid_partnership=bool(aff_link))
     except Exception as e:
+        msg = str(e)
+        match = re.search(r"status=(\d+)", msg)
+        status = int(match.group(1)) if match else None
+        if is_deferred_error(e):
+            append_log(draft_path.name, {"event": "post_deferred", "status": status, "error": msg})
+            print(f"[post DEFERRED status={status}] ドラフトを保持し次回リトライ: {msg}", file=sys.stderr)
+            return 1 if code == 403 else 0
         FAILED.mkdir(exist_ok=True)
         shutil.move(str(draft_path), str(FAILED / draft_path.name))
-        append_log(draft_path.name, {"event": "post_failed", "error": str(e), "polished": polished})
+        append_log(draft_path.name, {"event": "post_failed", "error": msg, "polished": polished})
         print(f"[post ERROR] {e}", file=sys.stderr)
         return 1
 
