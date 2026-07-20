@@ -71,7 +71,7 @@ class AutomationTests(unittest.TestCase):
             self.assertTrue(content_guard.find_duplicate("猫との暮らしは毎日たのしいです！", posted)[0])
 
     def test_transient_statuses_are_deferred(self):
-        for status in (403, 429, 500, 502, 503, 504):
+        for status in (429, 500, 502, 503, 504):
             self.assertTrue(pipeline.is_deferred_error(RuntimeError(f"status={status}")))
         self.assertFalse(pipeline.is_deferred_error(RuntimeError("status=400")))
 

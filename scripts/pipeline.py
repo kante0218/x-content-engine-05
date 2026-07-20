@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -93,7 +94,7 @@ def is_deferred_error(error: Exception) -> bool:
     msg = str(error)
     match = re.search(r"status=(\d+)", msg)
     status = int(match.group(1)) if match else None
-    return status in {402, 403, 429, 500, 502, 503, 504} or "CreditsDepleted" in msg
+    return status in {402, 429, 500, 502, 503, 504} or "CreditsDepleted" in msg
 
 
 def main() -> int:
@@ -140,6 +141,10 @@ def main() -> int:
         print(f"[polish ERROR] {e}", file=sys.stderr)
         return 1
     polished = with_affiliate_disclosure(polished, aff_link)
+    if aff_link:
+        parsed = urlparse(aff_link)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username:
+            raise ValueError("アフィリエイトリンクは有効なHTTPS URL必須です")
     print(f"[polished] ({len(polished)}文字)\n---\n{polished}\n---")
 
     duplicate, score = find_duplicate(polished, POSTED)
