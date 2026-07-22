@@ -2,12 +2,12 @@ name: auto-post
 
 # イケメンコンサル(@ikemen_consult) 自動投稿。Macが動いていなくてもGitHubのクラウドで実行する。
 #
-# ランダム時刻で1日3〜5回(bot感を消すため回数も日替わり):
+# ランダム時刻で1日およそ10〜12回(bot感を消すため回数も日替わり):
 #   - 1日12個の不規則な候補スロット(下のcron)で起動する。
 #   - 各起動で should_post.py が「投稿するか」をリザーバ方式で確率判定する。
-#   - 1日の目標回数は X_DAILY_TARGET(=4) を基準に、日付から決定的に 3〜5 回でゆらす。
+#   - 1日の目標回数は X_DAILY_TARGET(=11) を基準に、日付から決定的に 10〜12 回でゆらす。
 #     当たるスロットは毎日ランダムに散る。
-#   - 投稿が確定した回だけ、さらに0〜23分のランダム遅延を入れて分単位でも時刻を大きくばらす。
+#   - 投稿が確定した回だけ、さらに0〜10分のランダム遅延を入れて分単位でも時刻を大きくばらす。
 #   - 投稿しない回は即終了するので、GitHub Actionsの実行時間はほとんど消費しない。
 #
 # cronはUTC。下のコメントはJST。should_post.py の SLOTS_JST と必ず同期すること。
@@ -60,7 +60,7 @@ jobs:
       - name: Decide whether to post this slot
         id: gate
         env:
-          X_DAILY_TARGET: "4"
+          X_DAILY_TARGET: ${{ vars.X_DAILY_TARGET || '11' }}
         run: |
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             echo "force=true → 判定スキップして投稿"
@@ -74,7 +74,7 @@ jobs:
       - name: Random minute jitter (only when posting)
         if: steps.gate.outputs.go == 'true' && github.event.inputs.dry_run != 'true'
         run: |
-          J=$(( RANDOM % 1381 ))   # 0〜23分。投稿確定の回だけ遅らせ、分単位でも時刻を大きくばらす
+          J=$(( RANDOM % 601 ))   # 0〜10分。投稿確定の回だけ遅らせ、分単位でも時刻を大きくばらす
           echo "sleep ${J}s (~$(( J / 60 ))min) で分単位の時刻をばらす"
           sleep "$J"
 
@@ -94,7 +94,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
-          X_AFFILIATE_MAX_PER_DAY: "1"
+          X_AFFILIATE_MAX_PER_DAY: ${{ vars.X_AFFILIATE_MAX_PER_DAY || '3' }}
         run: python scripts/generate_draft.py
 
       - name: Polish & post pending
