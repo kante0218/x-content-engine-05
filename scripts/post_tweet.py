@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -31,13 +32,21 @@ def _max_chars() -> int:
         return 280
 
 
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def x_len(text: str) -> int:
+    """Xの文字数カウント: URLはt.coで一律23文字に短縮される仕様に合わせる。"""
+    return len(_URL_RE.sub("x" * 23, text))
+
+
 def post(text: str, quote_tweet_id: str | None = None, paid_partnership: bool = False) -> dict:
     text = text.strip()
     if not text:
         raise ValueError("空の投稿は送れません")
     limit = _max_chars()
-    if len(text) > limit:
-        raise ValueError(f"{len(text)}文字 > {limit}文字。先に推敲してください")
+    if x_len(text) > limit:
+        raise ValueError(f"{x_len(text)}文字(URL23換算) > {limit}文字。先に推敲してください")
 
     required = {
         "X_CONSUMER_KEY": os.getenv("X_CONSUMER_KEY"),
@@ -56,8 +65,8 @@ def post(text: str, quote_tweet_id: str | None = None, paid_partnership: bool = 
         resource_owner_secret=required["X_ACCESS_TOKEN_SECRET"],
     )
     payload: dict = {"text": text}
-    if paid_partnership:
-        payload["paid_partnership"] = True
+    # paid_partnership は POST /2/tweets の正式フィールドではなく400の恐れがあるため送らない。
+    # アフィ開示は本文の【PR】/※広告リンクを含みます で担保する。
     if quote_tweet_id:
         payload["quote_tweet_id"] = quote_tweet_id
     res = session.post(TWEETS_ENDPOINT, json=payload, timeout=30)
