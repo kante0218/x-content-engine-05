@@ -16,7 +16,7 @@ import random
 import sys
 from pathlib import Path
 
-from llm_gemini import Anthropic
+from anthropic import Anthropic
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
